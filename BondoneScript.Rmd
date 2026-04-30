@@ -2,38 +2,59 @@
 title: "Bondone_script"
 output: html_document
 date: "2026-02-25"
+
+# -----------------------------
+# PARAMETERS (Edit as needed)
+# -----------------------------
+params:
+  otu_table: "16S/otu_table_bacteria.csv"
+  tax_table: "16S/tax_table_bacteria.csv"
+  sample_table: "16S/sample_table.csv"
+  tree_file: "16S/16s_bacterialtree.nwk"
+  fasta_file: "16S/16s_bacteria_only.fasta"
+
 ---
 ```{r}
 save.emf=function(plot, name="plot.emf",height,width){
   emf(file=name,width=width,height)
   print(plot)
   dev.off()
-  }
+}
 ```
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r}
-install.packages('tidyverse')
 library(tidyverse)
-install.packages('phyloseq') #not working
-
 library(readr)
-
-install.packages('iCAMP')
 library(iCAMP)
-
 library(vegan)
 library(ade4)
-
-install.packages('ecodist')
 library(ecodist)
-
-install.packages('gtools')
 library(gtools)
 
+## ---- Packages: Install if needed (optional, eval=FALSE) ----
+```{r install-packages, eval=FALSE}
+packages <- c('tidyverse', 'phyloseq', 'iCAMP', 'vegan', 'ade4', 'ecodist', 'gtools', 'ggridges', 'viridis', 'ggpubr', 'MDMR', 'BiocManager')
+for (pkg in packages) if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg)
+if (!requireNamespace("phyloseq", quietly = TRUE)) BiocManager::install("phyloseq")
+```
+
+## ---- Load Libraries ----
+```{r libraries}
+library(tidyverse)
+library(phyloseq)
+library(iCAMP)
+library(vegan)
+library(ade4)
+library(ecodist)
+library(gtools)
+library(ggridges)
+library(viridis)
+library(ggpubr)
+library(MDMR)
+library(Biostrings)
 ```
 
 ```{r}
@@ -41,64 +62,59 @@ theme_set(theme_bw())
 ```
 
 
-#install phyloseq
-```{r}
-if (!require("BiocManager", quietly = TRUE))
-    install.packages("BiocManager")
-install.packages("BiocManager")
-BiocManager::install()
 
-BiocManager::install("phyloseq")
-library(phyloseq)
-
-```
-
-```{r}
-library(Biostrings)
-```
+## ---- Data Import ----
 
 ####################
-# *Import the files*
+
+# -----------------------------
+# DATA IMPORT
+# -----------------------------
+
 
 # import tree
 ```{r}
-Bact_tree<-read_tree('16S/16s_bacterialtree.nwk')
+Bact_tree<-read_tree(params$tree_file)
 ```
-# import fasta (this actually is not needed by phyloseq)
+# import fasta (optional)
 ```{r}
-Bact_fasta<-readDNAStringSet('16S/16s_bacteria_only.fasta')
+Bact_fasta<-readDNAStringSet(params$fasta_file)
 ```
 
 # import OTU
 ```{r}
-Bact_otu<-read.csv('16S/otu_table_bacteria.csv')
+Bact_otu<-read.csv(params$otu_table)
 
 rownames(Bact_otu)<-Bact_otu$SeqName # assign rownames
 Bact_otu$X<-NULL
 Bact_otu$SeqName<-NULL
 
-# remove the 'X' in front of sample names
 colnames(Bact_otu)<- gsub( 'X', '', colnames(Bact_otu) )
 ```
 
-#import sample tab
+
+# import sample tab
 ```{r}
-sample_tab<-read.csv('16S/sample_table.csv')
+sample_tab<-read.csv(params$sample_table)
 
 rownames(sample_tab)<-sample_tab$uniqueID # assign rownames
 sample_tab$X<-NULL
 ```
 
-#import tax table
+
+# import tax table
 ```{r}
-Bact_tax<-read.csv('16S/tax_table_bacteria.csv')
+Bact_tax<-read.csv(params$tax_table)
 
 rownames(Bact_tax)<-Bact_tax$SeqName # assign row names 
 Bact_tax<-Bact_tax[,-c(1,2)]
 
 ```
 
-# *import all into phyloseq*
+
+# -----------------------------
+# PHYLOSEQ OBJECT CONSTRUCTION
+# -----------------------------
 
 ```{r}
 class(Bact_tax)
@@ -119,7 +135,9 @@ b_ps<-phyloseq(b.OTU, b.TAX, b.sample, Bact_tree) # this includes all otus
 
 ```
 
-# *examine the OTU tab - check abundance, occurrences, etc*
+# -----------------------------
+# DATA EXPLORATION
+# -----------------------------
 # plot the abundance and occurrence (richness) profile of taxa per sample
 *discuss if rarefying to 12k reads is needed* - 
 ```{r}
@@ -146,14 +164,16 @@ sum(sort_taxa_abb>5)
 ```
 
 
-# Working on the *niche differences between taxa*
+# -----------------------------
+# NICHE ANALYSIS
+# -----------------------------
 ```{r}
 #traspose the Otu tab
 Bact_otu_t<-t(Bact_otu)
 Bact_otu_t<-as.data.frame(Bact_otu_t)
 ```
 
-# niche difference between OTUs (all OTUs now) bases on elevation (needed for Mantel test, etc)
+# niche difference between OTUs (all OTUs now) based on elevation (needed for Mantel test, etc)
 ```{r}
 niche.dif=iCAMP::dniche(env = sample_tab[,c(2,4,5,6)], 
                         comm =Bact_otu_t,
@@ -162,7 +182,7 @@ niche.dif=iCAMP::dniche(env = sample_tab[,c(2,4,5,6)],
                         nd.wd="~/Documents/FEM_work/PNRR/Bondone")
 ```
 
-# check the mean and variance of each taxa over the elevation gradient- elevetion niche (using all taxa)
+# check the mean and variance of each taxa over the elevation gradient (using all taxa)
 ```{r}
 elev_niche=
 ade4::sco.distri(sample_tab[,2],
@@ -198,8 +218,11 @@ theme_classic()+
   theme(axis.text.x = element_text(angle=45, vjust=0, hjust=0), axis.title = element_text(size=15))+theme(legend.position = 'none')
 ```
 
-#subsetting
-# *subset otu table excluding taxa present in only 3 sample*
+
+# -----------------------------
+# SUBSETTING
+# -----------------------------
+# subset OTU table excluding taxa present in only 3 samples
 
 ```{r}
 Bact_otu_subs<-
@@ -313,7 +336,7 @@ ggplot(data = elev_niche_subs, aes(x = mean, y = reorder(OTU, mean))) +
 ```
 
 
-# *calculate niche pH*, using the subset of taxa
+# calculate niche pH, using the subset of taxa
 ```{r}
  library(ade4)
 pH_niche_subs=
@@ -385,8 +408,10 @@ plot_niche=ggplot(data = pH_niche_subs, aes(x = mean, y = reorder(OTU, mean))) +
 
 
 
-##############################################
-## *Update phyloseq objet, using subset of taxa*
+
+# -----------------------------
+# UPDATE PHYLOSEQ OBJECT (subset)
+# -----------------------------
 
 ```{r}
 b_ps_subs<-prune_taxa(taxa_names(b_ps) %in% names(Bact_otu_subs_t), b_ps )
@@ -458,8 +483,10 @@ elev_dist_3col %>%
 
 
 
-################################
-# Further subset taxa (3000) towards the null models
+
+# -----------------------------
+# FURTHER SUBSET (3000 OTUs) FOR NULL MODELS
+# -----------------------------
 
 ```{r}
 sort_taxa_abb_subs # this is the sorting of subsetted otu, based on total abb
@@ -489,7 +516,7 @@ b_ps_3k
 pd_3k<-cophenetic(phy_tree(b_ps_3k))
 ```
 
-# *First test of null model (qpen)*
+# First test of null model (qpen)
 10 randomization takes 3 minutes
 120 randomiz in 11 minuts
 ```{r}
@@ -510,7 +537,7 @@ b_qp_3k$result$pair2<-paste(b_qp_3k$result$sample2, b_qp_3k$result$sample1, sep=
 ```
 
 
-# calculate *elevation distance between samples*
+# calculate elevation distance between samples
 ```{r}
 elev_dist_samples<-
 sample_tab %>% 
@@ -526,7 +553,7 @@ elev_dist_samples.df$pairs2<-paste(elev_dist_samples.df$name2, elev_dist_samples
 
 ```
 
-# calculate *pH distance between samples*
+# calculate pH distance between samples
 ```{r}
 pH_dist_samples<-
 sample_tab %>% 
@@ -588,7 +615,7 @@ cbind(b_qp_3k$result, tmp)
 b_qp_3k$result$pH_dist<-pH_dist_samples.df$dis[match(b_qp_3k$result$pair, pH_dist_samples.df$pairs)]
 ```
 
-# calculate *TC distance between samples*
+# calculate TC distance between samples
 ```{r}
 TC_dist_samples<-
 sample_tab %>% 
@@ -606,7 +633,7 @@ TC_dist_samples.df$pairs<-paste(TC_dist_samples.df$name1, TC_dist_samples.df$nam
 b_qp_3k$result$TC_dist<-TC_dist_samples.df$dis[match(b_qp_3k$result$pair, TC_dist_samples.df$pairs)]
 ```
 
-# calculate *TN distance between samples*
+# calculate TN distance between samples
 ```{r}
 TN_dist_samples<-
 sample_tab %>% 
@@ -697,15 +724,16 @@ TN_dist_bnti
 save.emf(TN_dist_bnti,"~/Downloads/TN_dist_bnti.emf",width = 6,height = 6)
 ```
 
-# calculat just bNTI, as distamce (to be used in MRM)
-*combining all samples*
+# calculate just bNTI, as distance (to be used in MRM)
 ```{r}
 b.bNTI.dist<-
   bNTIn.p(comm=Bact_otu_3k_t, dis=pd_3k,rand=400, 
           nworker=4, output.bMNTD = T)
 ```
 
-# Multiple reg on distance matrices
+# -----------------------------
+# MULTIPLE REGRESSION ON DISTANCE MATRICES (MRM)
+# -----------------------------
 
 ```{r}
 library(ecodist)
@@ -723,7 +751,7 @@ MRM(as.vector(as.dist(b.bNTI.dist$index)) ~ as.vector(elev_dist)+ as.vector(pH_d
 
 ```
 
-# extract sample tab *covariates* for min and or layers
+# extract sample tab covariates for MIN and OR layers
 ```{r}
 sample_tab_MIN<-
 sample_tab %>% 
@@ -735,7 +763,7 @@ sample_tab %>%
 
 ```
 
-# extract the pH and elevation distance between samples, for MIN and OR separate
+# extract the pH and elevation distance between samples, for MIN and OR separately
 ```{r}
 
 #MIN
@@ -770,7 +798,7 @@ vegdist( 'euclidean')
 ```
 
 
-# Subset the OTU 3k (trasposed) for each horizon (layer)
+# Subset the OTU 3k (transposed) for each horizon (layer)
 ```{r}
 Bact_otu_3k_t_MIN<-
   Bact_otu_3k_t %>% 
@@ -786,8 +814,7 @@ Bact_otu_3k_t_OR<-
 ```
 
 
-# *Subset phyloseq for OR and MIN separately*
-To extract e.g. phylo distance for separate samples/taxa combination
+# Subset phyloseq for OR and MIN separately
 ```{r}
 #phyloseq just for MIN
 b_ps_3k_MIN<-prune_samples(rownames(Bact_otu_3k_t_MIN), b_ps_3k) # subset samples
@@ -808,7 +835,6 @@ pd_3k_OR<-cophenetic(phy_tree(b_ps_3k_OR))
 ```
 
 # Calculate bNTI for MIN and OR separately
-#bNTI for MIN
 ```{r}
 b.bNTI.dist_MIN<-
   bNTIn.p(comm=Bact_otu_3k_t_MIN, dis=pd_3k_MIN,rand=400, 
@@ -822,8 +848,8 @@ b.bNTI.dist_OR<-
 ```
 
 
+
 # Run MRM (Multiple regression matrices) on MIN and OR separately
-#To check which driver is more influential towards bNTI for MIN and OR
 
 *we see again the pH is the main driver underpinning bNTI variation*
 *and that pH has stronger effect on MIN layers, rather than OR*
@@ -844,8 +870,10 @@ MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(elev_dist_samples_OR)+ 
 
 
 
-####### Plots of *processes* contribution over elevation / pH distances group #########
-################################################################################
+
+# -----------------------------
+# VISUALIZATION OF PROCESSES ACROSS GRADIENTS
+# -----------------------------
 # create the quantile cut for elevation distance and pH distance on the null model results
 
 
@@ -929,7 +957,7 @@ annotate_figure(process_elev_plot_ALL, top=text_grob('All layers          ', siz
                 bottom = textGrob("Pairwise elevation difference                   ", gp = gpar(cex = 1.3)))
 ```
 
-# Plot of processes over pH differences (combingin all layers)
+# Plot of processes over pH differences (combining all layers)
 ```{r}
 p1.pH<-
 b_qp_3k$result %>%  
@@ -970,8 +998,7 @@ b_qp_3k$result %>%
   scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
 ```
 
-# combined plot of processes for min layer over pH
-#*clear deterministic selection over the pH gradient*
+# combined plot of processes for MIN layer over pH
 
 ```{r}
 process_pH_plot_ALL<-
@@ -1046,7 +1073,7 @@ annotate_figure(process_pH_plot_MIN, top=text_grob('Mineral layer          ', si
 
 
 
-# ORlayers processes
+# OR layers processes
 ```{r}
 p1.pH_OR<-
 b_qp_3k$result %>%  
@@ -1092,8 +1119,6 @@ b_qp_3k$result %>%
 
 
 # the plot of processes for Organic layer
-*need to think how to interpret increasing disp. limitation over the pH gradient, just for OR layer*
-# *Eventually speak with James*
 ```{r}
 process_pH_plot_OR<-
 ggarrange(p1.pH_OR, p2.pH_OR, p3.pH_OR,  ncol=3, nrow=1, common.legend = TRUE, legend="right")
@@ -1104,8 +1129,10 @@ annotate_figure(process_pH_plot_OR, top=text_grob('Organic layer          ', siz
 
 
 
-##############
-# Add more pairing information, indicating the samples pairs coming from the same elevation step. 
+
+# -----------------------------
+# ADDITIONAL PAIRING INFORMATION
+# -----------------------------
 
 
 ```{r}
@@ -1128,7 +1155,7 @@ b_qp_3k$result$S_num<-
 ```
 
 # add Sample number (w/o replicate N, S, C, etc) to the sample table
-this is needed to add actual elevation info inot the null model results (only for the samples coming from same elevation)
+# this is needed to add actual elevation info into the null model results (only for the samples coming from same elevation)
 
 ```{r}
 sample_tab<-
@@ -1136,7 +1163,7 @@ sample_tab %>%
   mutate(S_num = str_sub(uniqueID, 1, 1))
 ```
 
-# add actual elevation and other drivers to the null model res
+# add actual elevation and other drivers to the null model results
 ```{r}
 b_qp_3k$result$elevation<-
   sample_tab$altitude[match(b_qp_3k$result$S_num, sample_tab$S_num)]
@@ -1148,8 +1175,8 @@ b_qp_3k$result$pH<-
 ```
 
 
-# No apparent homogenization (bray curtis) among replicates across the elevation (or pH) gradient
-# however there is a sign of *weaker homogenising selection as pH increase (lower pH values act as filter)*
+# No apparent homogenization (Bray-Curtis) among replicates across the elevation (or pH) gradient
+# however there is a sign of weaker homogenising selection as pH increases (lower pH values act as filter)
 ```{r}
 b_qp_3k$result %>%
   filter(S_match=='Same_S') %>% 
@@ -1176,6 +1203,11 @@ b_qp_3k$result %>%
 ```
 # Boxplot and trends for within sample bNTI vs pH values
 # highlights prevalent homogenising selection with low pH values (acidic soil)
+
+## ---- Session Info ----
+```{r session-info}
+sessionInfo()
+```
 ```{r}
 b_qp_3k$result %>%
   filter(S_match == 'Same_S', horiz_pair == 'Same_horiz') %>% 
