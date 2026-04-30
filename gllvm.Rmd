@@ -1,0 +1,110 @@
+```{r}
+library(gllvm)
+```
+### my version
+```{r}
+# Env variables (samples names are rows)
+Xenv=read.csv("~/Downloads/sample_table.csv")
+rownames(Xenv)=Xenv$uniqueID
+Xenv=Xenv[,-c(1,2)]
+add_site_column <- function(df) {
+  # 1. Extract row names
+  rows <- rownames(df)
+  
+  # 2. Extract only the digits (\\d+) from the names
+  # regmatches returns a list, so we unlist it to get a vector
+  site_numbers <- regmatches(rows, regexpr("\\d+", rows))
+  
+  # 3. Add the new column to the front of the dataframe
+  df <- cbind(site = site_numbers, df)
+  
+  return(df)
+}
+Xenv <- add_site_column(Xenv)
+
+# Otu Table (samples names are rows)
+Ysoil=read.csv("~/Downloads/otu_table_bacteria.csv")
+Ysoil=as.data.frame(t(Ysoil))
+names(Ysoil)=Ysoil[2,]
+Ysoil=Ysoil[-c(1:2),]
+rownames(Ysoil)=gsub("X","",rownames(Ysoil))
+Ysoil=as.matrix(Ysoil)
+mode(Ysoil) <- "numeric"
+Ysoil=as.data.frame(Ysoil)
+```
+
+
+```{r}
+meanY <- apply(Ysoil,2, mean)
+varY <- apply(Ysoil,2, var)
+plot(log(meanY),varY, log = "y", main = "Species mean-variance relationship")
+points(log(sort(meanY)), sort(meanY), type = "l")
+points(log(sort(meanY)), sort(meanY+ 1*meanY^2), type = "l", col=2, lty=2)
+legend("bottomright", lty=1:2, legend = c("var = mean", "var = mean+phi*mu^2"), bty="n", col = 1:2)
+```
+
+```{r}
+sDesign<-data.frame(Site=Xenv$site)
+ftNULL <- gllvm(Ysoil, studyDesign = sDesign, family = "negative.binomial", row.eff = ~(1|Site), num.lv = 2, sd.errors = FALSE)
+ftNULL
+```
+
+```{r}
+par(mfrow = c(1, 2))
+plot(ftNULL, which = 1:2, var.colors = 1, n.plot = 100)
+```
+
+```{r}
+# Define colors according to the values of pH, SOM and phosp
+library(grDevices)
+ph <- Xenv$pH
+rbPal <- colorRampPalette(c('mediumspringgreen', 'blue'))
+Colorsph <- rbPal(20)[as.numeric(cut(ph, breaks = 20))]
+breaks <- seq(min(ph), max(ph), length.out = 30)
+som <- Xenv$SOM
+Colorssom <- rbPal(20)[as.numeric(cut(som, breaks = 20))]
+breaks <- seq(min(som), max(som), length.out = 30)
+phosp <- Xenv$Phosp
+Colorsphosp <- rbPal(20)[as.numeric(cut(phosp, breaks = 20))]
+breaks <- seq(min(phosp), max(phosp), length.out = 30)
+# Define symbols for different sampling locations:
+pchr = NULL
+pchr[Xenv$Region == "Kil"] = 1
+pchr[Xenv$Region == "NyA"] = 2
+pchr[Xenv$Region == "Aus"] = 3
+
+# Ordination plots. Dark color indicates high environmental covariate value.
+ordiplot(ftNULL, main = "Ordination of sites, color: pH",
+         symbols = TRUE, pch = pchr, s.colors = Colorsph)
+legend("topleft", legend = c("Kil", "NyA", "Mayr"), pch = c(1, 2, 3), bty = "n")
+```
+```{r}
+# Sampling locations of the eight sampling sites:
+locaSites<-c(3,3,1,1,2,2,2,1)
+plot(ftNULL$params$row.params, xlab = "site", col = locaSites, pch = locaSites, 
+     main = "Site effects", ylab = "Site effect", xaxt = 'n', ylim = c(-1,1.5))
+axis(1, at=1:8, labels=levels(sDesign$Site))
+legend("topleft", legend = c("Kil", "NyA", "Mayr"), pch = c(1, 2, 3), 
+       col = c(1, 2, 3), bty = "n")
+```
+```{r}
+# Plot the species using column indices of the species:
+rownames(ftNULL$params$theta) <- 1:ncol(Ysoil)
+ordiplot(ftNULL, main = "Ordination of sites and species", xlim = c(-6, 5), 
+         ylim = c(-4, 4), symbols = TRUE, pch = pchr, s.colors = Colorsph, 
+         biplot = TRUE, ind.spp = 15, cex.spp = 0.9)
+legend("topleft", legend = c("Kil", "NyA", "Mayr"), pch=c(1, 2, 3), bty = "n")
+```
+
+```{r}
+# Scale environmental variables
+Xsoils <- scale(Xenv[, 1:3])
+```
+
+```{r}
+ftXph <- gllvm(Ysoil, X = Xsoils, studyDesign = sDesign, formula = ~pH, family = "negative.binomial", 
+               row.eff = ~(1|Site), num.lv = 2)
+```
+
+
+

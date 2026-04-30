@@ -1,0 +1,1197 @@
+---
+title: "Bondone_script"
+output: html_document
+date: "2026-02-25"
+---
+```{r}
+save.emf=function(plot, name="plot.emf",height,width){
+  emf(file=name,width=width,height)
+  print(plot)
+  dev.off()
+  }
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+install.packages('tidyverse')
+library(tidyverse)
+install.packages('phyloseq') #not working
+
+library(readr)
+
+install.packages('iCAMP')
+library(iCAMP)
+
+library(vegan)
+library(ade4)
+
+install.packages('ecodist')
+library(ecodist)
+
+install.packages('gtools')
+library(gtools)
+
+```
+
+```{r}
+theme_set(theme_bw())
+```
+
+
+#install phyloseq
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+install.packages("BiocManager")
+BiocManager::install()
+
+BiocManager::install("phyloseq")
+library(phyloseq)
+
+```
+
+```{r}
+library(Biostrings)
+```
+
+####################
+# *Import the files*
+
+# import tree
+```{r}
+Bact_tree<-read_tree('16S/16s_bacterialtree.nwk')
+```
+# import fasta (this actually is not needed by phyloseq)
+```{r}
+Bact_fasta<-readDNAStringSet('16S/16s_bacteria_only.fasta')
+```
+
+# import OTU
+```{r}
+Bact_otu<-read.csv('16S/otu_table_bacteria.csv')
+
+rownames(Bact_otu)<-Bact_otu$SeqName # assign rownames
+Bact_otu$X<-NULL
+Bact_otu$SeqName<-NULL
+
+# remove the 'X' in front of sample names
+colnames(Bact_otu)<- gsub( 'X', '', colnames(Bact_otu) )
+```
+
+#import sample tab
+```{r}
+sample_tab<-read.csv('16S/sample_table.csv')
+
+rownames(sample_tab)<-sample_tab$uniqueID # assign rownames
+sample_tab$X<-NULL
+```
+
+#import tax table
+```{r}
+Bact_tax<-read.csv('16S/tax_table_bacteria.csv')
+
+rownames(Bact_tax)<-Bact_tax$SeqName # assign row names 
+Bact_tax<-Bact_tax[,-c(1,2)]
+
+```
+
+# *import all into phyloseq*
+
+```{r}
+class(Bact_tax)
+Bact_tax<-as.matrix(Bact_tax) # convert to matrix
+```
+
+# create the needed dataframes for phyloseq
+```{r}
+b.OTU<-otu_table(Bact_otu, taxa_are_rows = T)
+b.TAX<-tax_table(Bact_tax)
+b.sample<-sample_data(sample_tab)
+
+```
+
+# create the phyloseq file *b_ps* - all OTUs for now (will subset later)
+```{r}
+b_ps<-phyloseq(b.OTU, b.TAX, b.sample, Bact_tree) # this includes all otus
+
+```
+
+# *examine the OTU tab - check abundance, occurrences, etc*
+# plot the abundance and occurrence (richness) profile of taxa per sample
+*discuss if rarefying to 12k reads is needed* - 
+```{r}
+sort.abb<-sort(colSums(Bact_otu), decreasing = T) # sort tot abundance per sample
+plot(sort.abb, type='l')
+
+sort.occ<-sort(colSums(vegan::decostand(Bact_otu, 'pa')), decreasing = T) # sort tot richness per sample
+plot(sort.occ, type='l')
+
+
+# many taxa found in only 1 sample
+sort_taxa_occur<-sort(rowSums(vegan::decostand(Bact_otu, 'pa'))) # sort tot occurrence per taxa (in how many samples does the taxa occur)
+plot(sort_taxa_occur, type='l')
+
+sum(sort_taxa_occur>1) # many with low occurrence
+
+
+sort_taxa_abb<-sort(rowSums(Bact_otu)) # sort tot abundance per taxa
+plot(sort_taxa_abb, type='l')
+
+sum(sort_taxa_abb>5)
+
+
+```
+
+
+# Working on the *niche differences between taxa*
+```{r}
+#traspose the Otu tab
+Bact_otu_t<-t(Bact_otu)
+Bact_otu_t<-as.data.frame(Bact_otu_t)
+```
+
+# niche difference between OTUs (all OTUs now) bases on elevation (needed for Mantel test, etc)
+```{r}
+niche.dif=iCAMP::dniche(env = sample_tab[,c(2,4,5,6)], 
+                        comm =Bact_otu_t,
+                        method = "niche.value",
+                        nworker = 4,out.dist=T, bigmemo=F,
+                        nd.wd="~/Documents/FEM_work/PNRR/Bondone")
+```
+
+# check the mean and variance of each taxa over the elevation gradient- elevetion niche (using all taxa)
+```{r}
+elev_niche=
+ade4::sco.distri(sample_tab[,2],
+           Bact_otu_t ,
+            labels = NULL)
+```
+
+```{r}
+class(Bact_tax)
+Bact_tax<-as.data.frame(Bact_tax)
+
+```
+
+# add phylum and Otu info on the elev_niche df
+```{r}
+elev_niche$Phylum= Bact_tax$Phylum[match(row.names(elev_niche), row.names(Bact_tax))]
+elev_niche$OTU= rownames(elev_niche)
+
+
+```
+
+
+# plot elevation niche using all taxa
+```{r fig.width=6, fig.height=9}
+ ggplot(data=elev_niche ,
+        aes(x=mean, y=reorder(OTU, mean), xmin=(mean-sqrt(var)), xmax=(mean+sqrt(var))))+xlab('Elevation')+ylab('Bacterial taxa')+
+    geom_point(data=elev_niche %>% select(mean, var, OTU), aes(x=mean, y=reorder(OTU, mean), xmin=(mean-sqrt(var)), xmax=(mean+sqrt(var))),   size=1, shape=21, col='grey60')+geom_errorbarh(size=0.3, col='grey60')+theme(axis.text.x = element_text(angle=45, vjust=0, hjust=0))+xlim(700, 1650)+
+
+theme_classic()+
+  
+    geom_point(aes(col=Phylum ))+
+ geom_errorbarh(aes(col=Phylum), size=0.3)+theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())+facet_wrap(~Phylum)+
+  theme(axis.text.x = element_text(angle=45, vjust=0, hjust=0), axis.title = element_text(size=15))+theme(legend.position = 'none')
+```
+
+#subsetting
+# *subset otu table excluding taxa present in only 3 sample*
+
+```{r}
+Bact_otu_subs<-
+Bact_otu %>% 
+  filter(rownames(Bact_otu) %in% names(sort_taxa_occur[sort_taxa_occur>3]) ) # filter using names from the df 'sort_taxa_occur'
+
+# these the names of taxa occurring in >3 sample
+names(sort_taxa_occur[sort_taxa_occur>3])
+
+# how many reads per OTU in the subsetted group?
+sort_taxa_abb_subs<-sort(rowSums(Bact_otu_subs), decreasing = T) # within the taxa occurring in >3 samples, the min read (abb) is 5
+
+```
+# Traspose subsetted OTU tab
+```{r}
+Bact_otu_subs_t<-as.data.frame(t(Bact_otu_subs))
+```
+
+
+
+
+# calculate niche elevation, using the subset of taxa
+```{r}
+elev_niche_subs=
+sco.distri(sample_tab[,2],
+           Bact_otu_subs_t ,
+            labels = NULL)
+```
+# add tax information
+```{r}
+elev_niche_subs$Phylum= Bact_tax$Phylum[match(row.names(elev_niche_subs), row.names(Bact_tax))]
+elev_niche_subs$OTU= rownames(elev_niche_subs)
+```
+
+# plot elevation niche with subset of taxa (c 11k otus)
+```{r fig.width=6.5, fig.height=9}
+ ggplot(data=elev_niche_subs ,
+        aes(x=mean, y=reorder(OTU, mean), xmin=(mean-sqrt(var)), xmax=(mean+sqrt(var))))+xlab('Elevation')+ylab('Bacterial taxa')+
+    geom_point(data=elev_niche_subs %>% select(mean, var, OTU), aes(x=mean, y=reorder(OTU, mean), xmin=(mean-sqrt(var)), xmax=(mean+sqrt(var))),   size=1, shape=21, col='grey60')+geom_errorbarh(size=0.3, col='grey60')+theme(axis.text.x = element_text(angle=45, vjust=0, hjust=0))+xlim(700, 1650)+
+
+theme_classic()+
+  
+    geom_point(aes(col=Phylum ))+
+ geom_errorbarh(aes(col=Phylum), size=0.3)+theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())+facet_wrap(~Phylum)+
+  theme(axis.text.x = element_text(angle=45, vjust=0, hjust=0), axis.title = element_text(size=15), strip.text = element_text(size=7))+theme(legend.position = 'none')
+```
+
+```{r}
+library(ggridges)
+
+ggplot(elev_niche_subs, aes(x = mean, y = Phylum, fill = Phylum)) +
+  # 1. Add a density ridge to show distribution shape
+  geom_density_ridges(alpha = 0.7, scale = 1.2, rel_min_height = 0.01) +
+  
+  # 2. Add a vertical line for the global mean elevation to provide a reference point
+  geom_vline(xintercept = mean(elev_niche_subs$mean), linetype = "dashed", color = "grey50") +
+  
+  # 3. Clean up the scales
+  scale_x_continuous(limits = c(700, 1650), name = "Elevation Niche (Mean)") +
+  scale_y_discrete(name = "Bacterial Phylum") +
+  
+  # 4. Professional Theme
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text.y = element_text(size = 8),
+    panel.grid.minor = element_blank()
+  ) +
+  labs(title = "Elevation Niche Breadth by Phylum",
+       subtitle = "Density represents distribution of OTU mean elevation niches")
+```
+```{r}
+library(viridis)
+
+# Calculate SD for coloring
+elev_niche_subs <- elev_niche_subs %>% 
+  mutate(sd_val = sqrt(var))
+
+# 2. Start ggplot with ONLY the basics shared by EVERYTHING
+ggplot(data = elev_niche_subs, aes(x = mean, y = reorder(OTU, mean))) +
+  
+  # Layer A: Background "All Taxa" (Uses mean and OTU only)
+  geom_point(data = elev_niche_subs %>% select(mean, OTU), 
+             color = "grey90", 
+             size = 0.5, 
+             alpha = 0.2) +
+  
+  # Layer B: Phylum-specific Error Bars (Define xmin/xmax/color locally)
+  geom_errorbarh(aes(xmin = mean - sd_val, 
+                     xmax = mean + sd_val, 
+                     color = sd_val), 
+                 size = 0.2, alpha = 0.6) +
+  
+  # Layer C: Phylum-specific Points (Define color locally)
+  geom_point(aes(color = sd_val), size = 0.8) +
+  
+  # 3. Rest of the styling
+  scale_color_viridis_c(option = "magma", name = "Niche Breadth (SD)") +
+  facet_wrap(~Phylum) +
+  xlim(700, 1650) +
+  labs(x = "Elevation (m)", y = "Bacterial Taxa (Ranked by Elevation)") +
+  theme_classic() +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    strip.background = element_blank(),
+    strip.text = element_text(face = "bold", size = 7),
+    legend.position = "bottom"
+  )
+```
+
+
+# *calculate niche pH*, using the subset of taxa
+```{r}
+ library(ade4)
+pH_niche_subs=
+sco.distri(sample_tab[,4],
+           Bact_otu_subs_t ,
+            labels = NULL)
+```
+# add tax information
+```{r}
+pH_niche_subs$Phylum= Bact_tax$Phylum[match(row.names(pH_niche_subs), row.names(Bact_tax))]
+pH_niche_subs$OTU= rownames(pH_niche_subs)
+```
+
+# plot elevation niche with subset of taxa (c 11k otus)
+```{r fig.width=6.5, fig.height=9}
+ ggplot(data=pH_niche_subs ,
+        aes(x=mean, y=reorder(OTU, mean), xmin=(mean-sqrt(var)), xmax=(mean+sqrt(var))))+xlab('pH')+ylab('Bacterial taxa')+
+    geom_point(data=pH_niche_subs %>% select(mean, var, OTU), aes(x=mean, y=reorder(OTU, mean), xmin=(mean-sqrt(var)), xmax=(mean+sqrt(var))),   size=1, shape=21, col='grey60')+geom_errorbarh(size=0.3, col='grey60')+theme(axis.text.x = element_text(angle=45, vjust=0, hjust=0))+xlim(4, 8)+
+
+theme_classic()+
+  
+    geom_point(aes(col=Phylum ))+
+ geom_errorbarh(aes(col=Phylum), size=0.3)+theme(axis.text.y = element_blank(), axis.ticks.y = element_blank())+facet_wrap(~Phylum)+
+  theme(axis.text.x = element_text(angle=45, vjust=0, hjust=0), axis.title = element_text(size=15), strip.text = element_text(size=7))+theme(legend.position = 'none')
+```
+
+```{r}
+library(viridis)
+pH_niche_subs$Phylum[pH_niche_subs$Phylum == "SAR324 clade(Marine group B)"] <- "SAR324 clade"
+# Calculate SD for coloring
+pH_niche_subs <- pH_niche_subs %>% 
+  mutate(sd_val = sqrt(var))
+
+
+# 2. Start ggplot with ONLY the basics shared by EVERYTHING
+plot_niche=ggplot(data = pH_niche_subs, aes(x = mean, y = reorder(OTU, mean))) +
+  
+  # Layer A: Background "All Taxa" (Uses mean and OTU only)
+  geom_point(data = pH_niche_subs %>% select(mean, OTU), 
+             color = "grey90", 
+             size = 1, 
+             alpha = 0.3) +
+  
+  # Layer B: Phylum-specific Error Bars (Define xmin/xmax/color locally)
+  geom_errorbarh(aes(xmin = mean - sd_val, 
+                     xmax = mean + sd_val, 
+                     color = sd_val), 
+                 size = 0.2, alpha = 0.6) +
+  
+  # Layer C: Phylum-specific Points (Define color locally)
+  geom_point(aes(color = sd_val), size = 0.8) +
+  
+  # 3. Rest of the styling
+  scale_color_viridis_c(option = "magma", name = "Niche Breadth (SD)") +
+  facet_wrap(~Phylum) +
+  xlim(4,7.6) +
+  labs(x = "pH", y = "Bacterial Taxa") +
+  theme_classic() +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 12),
+    strip.background = element_blank(),
+    strip.text = element_text(size = 12),
+    legend.position = "bottom"
+  )
+#save.emf(plot_niche, "/home/mina/Documents/Anita/niche_pH.emf",height = 10,width = 10)
+```
+
+
+
+##############################################
+## *Update phyloseq objet, using subset of taxa*
+
+```{r}
+b_ps_subs<-prune_taxa(taxa_names(b_ps) %in% names(Bact_otu_subs_t), b_ps )
+```
+
+# calculate the *niche difference* using subsetted phyloseq (based on 6631 otu)
+```{r}
+niche.dif_subs=iCAMP::dniche(env = sample_tab[,c(2,4,5,6)], 
+                        comm =Bact_otu_subs_t,
+                        method = "niche.value",
+                        nworker = 4,out.dist=T, bigmemo=F,
+                        nd.wd="~/Documents/FEM_work/PNRR/Bondone")
+```
+
+# extract the phylogen distance *pd.subs*
+```{r}
+pd.subs=cophenetic(phy_tree(b_ps_subs))
+```
+
+# Plot the mantel correlogram for altitude
+*this takes about 10m*
+```{r}
+mantest.elev=
+mantel.correlog(as.dist(pd.subs),as.dist(niche.dif_subs$nd$altitude), nperm = 150 )
+```
+
+```{r}
+plot(mantest.elev, alpha=.05) 
+title('Correlogram Elevation')
+```
+
+# Chunks of code to plot the pairwise phylo and niche differences - 
+# transform the elevation and phylo distance into 3cols matrices
+```{r}
+elev_dist<-as.dist(niche.dif_subs$nd$altitude)
+pd_dist<-as.dist(pd.subs)
+
+elev_dist_3col<-
+dist.3col(elev_dist)
+
+#elev_d
+
+pd_dist_3col<-
+  dist.3col(pd_dist)
+
+
+
+```
+
+# add the otu-pairs to each df
+```{r}
+pd_dist_3col$pairs<-paste(pd_dist_3col$name1, pd_dist_3col$name2, sep='_')
+
+elev_dist_3col$pairs<-paste(elev_dist_3col$name1, elev_dist_3col$name2, sep='_')
+
+```
+
+# add the phylo distance into the elevation distance df (using the same otu pairs to guide the match)
+```{r}
+elev_dist_3col$pd_dist<-pd_dist_3col$dis[match(elev_dist_3col$pairs, pd_dist_3col$pairs )]
+```
+
+# explore relation between raw distances (elev vs phylo)
+*strong relation for short-medium phylo distances.*
+```{r}
+elev_dist_3col %>% 
+  ggplot()+aes(pd_dist, dis)+geom_smooth()
+```
+
+
+
+################################
+# Further subset taxa (3000) towards the null models
+
+```{r}
+sort_taxa_abb_subs # this is the sorting of subsetted otu, based on total abb
+names(sort_taxa_abb_subs[1:100]) # names of the first 100 otus
+
+```
+# *subset the 3000 most abbund OTUs*
+```{r}
+Bact_otu_3k<-
+  Bact_otu_subs %>% 
+  filter(rownames(Bact_otu_subs) %in% names(sort_taxa_abb_subs[1:3000]))
+```
+# create the transpose version of the 3k otu df
+```{r}
+Bact_otu_3k_t<-as.data.frame(t(Bact_otu_3k))
+```
+
+# Create the Phyloseq file with the 3k otus
+*b_ps_3k*
+
+```{r}
+b_ps_3k<-prune_taxa(taxa_names(b_ps_subs) %in% names(Bact_otu_3k_t), b_ps_subs )
+b_ps_3k
+```
+# extract the phylo tree from the 3k otu phyloseq
+```{r}
+pd_3k<-cophenetic(phy_tree(b_ps_3k))
+```
+
+# *First test of null model (qpen)*
+10 randomization takes 3 minutes
+120 randomiz in 11 minuts
+```{r}
+b_qp_3k=qpen(comm= Bact_otu_3k_t, pd=pd_3k, 
+            tree=phy_tree(b_ps_3k),
+             rand.time=500, nworker=4)
+```
+
+# see results
+```{r}
+b_qp_3k$result
+```
+# add the info on site pairs (using both pair combinations; likely not needed)
+```{r}
+b_qp_3k$result$pair<-paste(b_qp_3k$result$sample1, b_qp_3k$result$sample2, sep=".")
+b_qp_3k$result$pair2<-paste(b_qp_3k$result$sample2, b_qp_3k$result$sample1, sep=".")
+
+```
+
+
+# calculate *elevation distance between samples*
+```{r}
+elev_dist_samples<-
+sample_tab %>% 
+  mutate(dummy=1) %>% 
+  select(altitude, dummy) %>% 
+vegdist( 'euclidean')
+```
+# transform elevation distance into 3col matrix
+```{r}
+elev_dist_samples.df<-dist.3col(elev_dist_samples)
+elev_dist_samples.df$pairs<-paste(elev_dist_samples.df$name1, elev_dist_samples.df$name2, sep=".")
+elev_dist_samples.df$pairs2<-paste(elev_dist_samples.df$name2, elev_dist_samples.df$name1, sep=".") # maybe not needed
+
+```
+
+# calculate *pH distance between samples*
+```{r}
+pH_dist_samples<-
+sample_tab %>% 
+  mutate(dummy=1) %>% 
+  select(pH, dummy) %>% 
+vegdist( 'euclidean')
+```
+# transform pH distance into 3col matrix
+```{r}
+pH_dist_samples.df<-dist.3col(pH_dist_samples)
+pH_dist_samples.df$pairs<-paste(pH_dist_samples.df$name1, pH_dist_samples.df$name2, sep=".")
+```
+
+
+
+# add the elevation distance to the null model results
+```{r}
+b_qp_3k$result$elev_dist<-elev_dist_samples.df$dis[match(b_qp_3k$result$pair, elev_dist_samples.df$pairs)]
+sum(is.na(b_qp_3k$result$elev_dist))
+```
+
+# work on a temporary df (from the sample pairs only) where I split the sample pairs into additional pairing information
+```{r}
+tmp<-b_qp_3k$result[,c(1,2)] # only use the sample pairs info
+
+#split the sample 1 (of the pair) into replicate, horizon, and A,B info
+tmp<- 
+tmp %>% 
+  separate_wider_delim(sample1, delim = '_', names=c('S1_repl', 'S1_horiz', "S1_AB"), too_few = 'align_start')
+
+#do as above for sample 2 (of the pair)
+tmp<-
+tmp %>% 
+  separate_wider_delim(sample2, delim = '_', names=c('S2_repl', 'S2_horiz', "S2_AB"), too_few = 'align_start')
+```
+
+# add horizon pair match on the tmp data
+```{r}
+# if same horizon, or different horizon
+tmp$horiz_pair<-
+ifelse(tmp$S1_horiz == tmp$S2_horiz, 'Same_horiz', 'diff_horiz')
+
+# add horizon type info (OR, MIN) for the same horizon pairs, otherwise write 'Mix horizon' (when not the same horizon between the pair of samples)
+tmp$horiz_type<-
+  ifelse(tmp$horiz_pair=='Same_horiz', tmp$S1_horiz, 'Mix_horiz')
+```
+
+# add the sample pairing information into the null model results
+*must rerun the null model. I have cancelled part of the results by doing this!*
+```{r}
+# use b_qp_3k$results!!
+b_qp_3k$result<-
+cbind(b_qp_3k$result, tmp)
+
+```
+
+*add the pH, but need to redo it properly once I run the null again*
+```{r}
+b_qp_3k$result$pH_dist<-pH_dist_samples.df$dis[match(b_qp_3k$result$pair, pH_dist_samples.df$pairs)]
+```
+
+# calculate *TC distance between samples*
+```{r}
+TC_dist_samples<-
+sample_tab %>% 
+  mutate(dummy=1) %>% 
+  select(TC, dummy) %>% 
+vegdist( 'euclidean')
+```
+# transform TC distance into 3col matrix
+```{r}
+TC_dist_samples.df<-dist.3col(TC_dist_samples)
+TC_dist_samples.df$pairs<-paste(TC_dist_samples.df$name1, TC_dist_samples.df$name2, sep=".")
+```
+
+```{r}
+b_qp_3k$result$TC_dist<-TC_dist_samples.df$dis[match(b_qp_3k$result$pair, TC_dist_samples.df$pairs)]
+```
+
+# calculate *TN distance between samples*
+```{r}
+TN_dist_samples<-
+sample_tab %>% 
+  mutate(dummy=1) %>% 
+  select(TN, dummy) %>% 
+vegdist( 'euclidean')
+```
+# transform TC distance into 3col matrix
+```{r}
+TN_dist_samples.df<-dist.3col(TN_dist_samples)
+TN_dist_samples.df$pairs<-paste(TN_dist_samples.df$name1, TN_dist_samples.df$name2, sep=".")
+```
+
+```{r}
+b_qp_3k$result$TN_dist<-TN_dist_samples.df$dis[match(b_qp_3k$result$pair, TN_dist_samples.df$pairs)]
+```
+
+
+```{r}
+b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(elev_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')+
+  geom_point()
+
+b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(elev_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')
+
+elev_dist_bnti=
+  b_qp_3k$result %>%
+  filter(horiz_type != 'Mix_horiz') %>%
+  ggplot(aes(x = elev_dist, y = bNTI, color = horiz_type)) +
+  geom_smooth(method = 'lm') +
+  geom_hline(yintercept = c(-2, 2), color = 'black', linetype = 'dashed') +
+  # Adding manual colors: MIN = orange, OR = blue
+  scale_color_manual(values = c("MIN" = "darkorange", "OR" = "steelblue")) +
+  labs(x = "Elevation Distance", y = "bNTI", color = "Horizon")+
+  theme_classic(base_size = 18)
+#save.emf(,"~/Downloads/elev_dist_bnti.emf",width = 6,height = 6)
+```
+
+
+```{r}
+b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(pH_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')
+
+pH_dist_bnti =b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(pH_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')+
+  xlab('pH distance between samples') +
+  scale_color_manual(values = c("MIN" = "darkorange", "OR" = "steelblue")) +
+  labs(y = "bNTI", color = "Horizon")+
+  theme_classic(base_size = 18)+geom_point()
+pH_dist_bnti
+#save.emf(pH_dist_bnti,"~/Downloads/pH_dist_bnti.emf",width = 6,height = 6)
+```
+
+```{r}
+b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(TC_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')
+
+TC_dist_bnti =b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(TC_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')+
+  xlab('TC distance between samples') +
+  scale_color_manual(values = c("MIN" = "darkorange", "OR" = "steelblue")) +
+  labs(y = "bNTI", color = "Horizon")+
+  theme_classic(base_size = 18) + geom_point()
+TC_dist_bnti
+save.emf(TC_dist_bnti,"~/Downloads/TC_dist_bnti.emf",width = 6,height = 6)
+```
+
+```{r}
+b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(TN_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')
+
+TN_dist_bnti =b_qp_3k$result %>% 
+  filter(horiz_type != 'Mix_horiz') %>% 
+  ggplot()+aes(TN_dist, bNTI, col=horiz_type)+geom_smooth(method='lm')+geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')+
+  xlab('TN distance between samples') +
+  scale_color_manual(values = c("MIN" = "darkorange", "OR" = "steelblue")) +
+  labs(y = "bNTI", color = "Horizon")+
+  theme_classic(base_size = 18)
+TN_dist_bnti
+save.emf(TN_dist_bnti,"~/Downloads/TN_dist_bnti.emf",width = 6,height = 6)
+```
+
+# calculat just bNTI, as distamce (to be used in MRM)
+*combining all samples*
+```{r}
+b.bNTI.dist<-
+  bNTIn.p(comm=Bact_otu_3k_t, dis=pd_3k,rand=400, 
+          nworker=4, output.bMNTD = T)
+```
+
+# Multiple reg on distance matrices
+
+```{r}
+library(ecodist)
+#install.packages('MDMR')
+library(MDMR)
+```
+
+# *multiuple distance matrix regression indicates that pH is the key driver of bNTI variation*
+# here combining all samples
+```{r}
+MRM(as.vector(as.dist(b.bNTI.dist$index)) ~ as.vector(elev_dist)) # R2=0.027; p=0.001
+MRM(as.vector(as.dist(b.bNTI.dist$index)) ~ as.vector(pH_dist_samples)) # R2=0.557; p=0.001
+
+MRM(as.vector(as.dist(b.bNTI.dist$index)) ~ as.vector(elev_dist)+ as.vector(pH_dist_samples)) # R2=0.559
+
+```
+
+# extract sample tab *covariates* for min and or layers
+```{r}
+sample_tab_MIN<-
+sample_tab %>% 
+  filter(horizon == 'MIN_A' | horizon =='MIN_B') 
+
+sample_tab_OR<-
+sample_tab %>% 
+  filter(horizon == 'OR') 
+
+```
+
+# extract the pH and elevation distance between samples, for MIN and OR separate
+```{r}
+
+#MIN
+pH_dist_samples_MIN<-
+sample_tab_MIN %>% 
+  mutate(dummy=1) %>% 
+  select(pH, dummy) %>% 
+vegdist( 'euclidean')
+
+
+elev_dist_samples_MIN<-
+sample_tab_MIN %>% 
+  mutate(dummy=1) %>% 
+  select(altitude, dummy) %>% 
+vegdist( 'euclidean')
+
+
+# OR
+pH_dist_samples_OR<-
+sample_tab_OR %>% 
+  mutate(dummy=1) %>% 
+  select(pH, dummy) %>% 
+vegdist( 'euclidean')
+
+
+elev_dist_samples_OR<-
+sample_tab_OR %>% 
+  mutate(dummy=1) %>% 
+  select(altitude, dummy) %>% 
+vegdist( 'euclidean')
+
+```
+
+
+# Subset the OTU 3k (trasposed) for each horizon (layer)
+```{r}
+Bact_otu_3k_t_MIN<-
+  Bact_otu_3k_t %>% 
+  filter(rownames(Bact_otu_3k_t) %in% rownames(sample_tab_MIN))
+           
+           
+           
+Bact_otu_3k_t_OR<-
+  Bact_otu_3k_t %>% 
+  filter(rownames(Bact_otu_3k_t) %in% rownames(sample_tab_OR))
+
+
+```
+
+
+# *Subset phyloseq for OR and MIN separately*
+To extract e.g. phylo distance for separate samples/taxa combination
+```{r}
+#phyloseq just for MIN
+b_ps_3k_MIN<-prune_samples(rownames(Bact_otu_3k_t_MIN), b_ps_3k) # subset samples
+b_ps_3k_MIN<- prune_taxa(taxa_sums(b_ps_3k_MIN)>0, b_ps_3k_MIN) # remove taxa that now have 0 abund
+
+
+#and for OR
+b_ps_3k_OR<-prune_samples(rownames(Bact_otu_3k_t_OR), b_ps_3k) # subset samples
+b_ps_3k_OR<- prune_taxa(taxa_sums(b_ps_3k_OR)>0, b_ps_3k_OR) # remove taxa that now have 0 abund
+```
+# extract the phylo distance for MIN and OR
+
+```{r}
+pd_3k_MIN<-cophenetic(phy_tree(b_ps_3k_MIN))
+
+pd_3k_OR<-cophenetic(phy_tree(b_ps_3k_OR))
+
+```
+
+# Calculate bNTI for MIN and OR separately
+#bNTI for MIN
+```{r}
+b.bNTI.dist_MIN<-
+  bNTIn.p(comm=Bact_otu_3k_t_MIN, dis=pd_3k_MIN,rand=400, 
+          nworker=4, output.bMNTD = T)
+```
+#bNTI for OR
+```{r}
+b.bNTI.dist_OR<-
+  bNTIn.p(comm=Bact_otu_3k_t_OR, dis=pd_3k_OR,rand=400, 
+          nworker=4, output.bMNTD = T)
+```
+
+
+# Run MRM (Multiple regression matrices) on MIN and OR separately
+#To check which driver is more influential towards bNTI for MIN and OR
+
+*we see again the pH is the main driver underpinning bNTI variation*
+*and that pH has stronger effect on MIN layers, rather than OR*
+```{r}
+#MRM on MIN
+MRM(as.vector(as.dist(b.bNTI.dist_MIN$index)) ~ as.vector(elev_dist_samples_MIN)) # R2=0.035; p=0.001
+MRM(as.vector(as.dist(b.bNTI.dist_MIN$index)) ~ as.vector(pH_dist_samples_MIN)) # R2=0.589; p=0.001
+
+MRM(as.vector(as.dist(b.bNTI.dist_MIN$index)) ~ as.vector(elev_dist_samples_MIN)+ as.vector(pH_dist_samples_MIN)) # R2=0.589; negligible effect of elevation 
+
+# MRM on OR
+MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(elev_dist_samples_OR)) # R2=0.005, p=NS
+MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(pH_dist_samples_OR)) # R2 = 0.26
+
+MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(elev_dist_samples_OR)+ as.vector(pH_dist_samples_OR)) # R2=0.27
+```
+
+
+
+
+####### Plots of *processes* contribution over elevation / pH distances group #########
+################################################################################
+# create the quantile cut for elevation distance and pH distance on the null model results
+
+
+```{r}
+b_qp_3k$result$elev_dist_q<-
+  quantcut(b_qp_3k$result$elev_dist, 3)
+
+
+b_qp_3k$result$pH_dist_q<-
+  quantcut(b_qp_3k$result$pH_dist,3)
+```
+
+# mutate heterogen to variable in assembly processes
+```{r}
+b_qp_3k$result<-
+b_qp_3k$result %>% 
+ mutate(process= str_replace(process, "Heterogeneous", "Variable"))
+
+unique(b_qp_3k$result$process)
+```
+
+
+# Plot of processes over three quantiles of elevation diff (all layers combined)
+```{r}
+
+p1.elev<-
+b_qp_3k$result %>%  
+ filter(elev_dist_q =="[0,117]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0-117 m')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p2.elev<-
+b_qp_3k$result %>%  
+ filter(elev_dist_q =="(117,316]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('117--316 m')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p3.elev<-
+b_qp_3k$result %>%  
+ filter(elev_dist_q =="(316,639]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('316-639 m')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+```
+
+
+```{r}
+install.packages('ggpubr')
+library(ggpubr)
+library(grid)
+```
+
+# the combined plot of processes over elevation diff
+*for all samples across layers*
+```{r}
+process_elev_plot_ALL<-
+ggarrange(p1.elev, p2.elev, p3.elev,  ncol=3, nrow=1, common.legend = TRUE, legend="right")
+
+annotate_figure(process_elev_plot_ALL, top=text_grob('All layers          ', size=14) ,
+                bottom = textGrob("Pairwise elevation difference                   ", gp = gpar(cex = 1.3)))
+```
+
+# Plot of processes over pH differences (combingin all layers)
+```{r}
+p1.pH<-
+b_qp_3k$result %>%  
+ filter(pH_dist_q =="[0,0.51]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0 - 0.51 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p2.pH<-
+b_qp_3k$result %>%  
+     filter(pH_dist_q =="(0.51,1.45]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0.51 - 1.45 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p3.pH<-
+b_qp_3k$result %>%  
+ filter(pH_dist_q =="(1.45,2.89]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('1.45 - 2.89 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+```
+
+# combined plot of processes for min layer over pH
+#*clear deterministic selection over the pH gradient*
+
+```{r}
+process_pH_plot_ALL<-
+ggarrange(p1.pH, p2.pH, p3.pH,  ncol=3, nrow=1, common.legend = TRUE, legend="right")
+
+annotate_figure(process_pH_plot_ALL, top=text_grob('All layers          ', size=14) ,
+                bottom = textGrob("Pairwise pH difference                   ", gp = gpar(cex = 1.3)))
+```
+
+
+
+
+
+
+##############################################################
+# Plots of processes across pH quantiles, separated for layers
+
+# MIN layers processes plot
+```{r}
+p1.pH_MIN<-
+b_qp_3k$result %>%  
+  filter(horiz_type=='MIN') %>% 
+ filter(pH_dist_q =="[0,0.51]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0 - 0.51 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p2.pH_MIN<-
+b_qp_3k$result %>%  
+    filter(horiz_type=='MIN') %>% 
+ filter(pH_dist_q =="(0.51,1.45]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0.51 - 1.45 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p3.pH_MIN<-
+b_qp_3k$result %>%  
+    filter(horiz_type=='MIN') %>% 
+ filter(pH_dist_q =="(1.45,2.89]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('1.45 - 2.89 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+```
+
+# combined plot of processes for min layer over pH
+```{r}
+process_pH_plot_MIN<-
+ggarrange(p1.pH_MIN, p2.pH_MIN, p3.pH_MIN,  ncol=3, nrow=1, common.legend = TRUE, legend="right")
+
+annotate_figure(process_pH_plot_MIN, top=text_grob('Mineral layer          ', size=14) ,
+                bottom = textGrob("Pairwise pH difference                   ", gp = gpar(cex = 1.3)))
+```
+
+
+
+
+
+# ORlayers processes
+```{r}
+p1.pH_OR<-
+b_qp_3k$result %>%  
+  filter(horiz_type=='OR') %>% 
+ filter(pH_dist_q =="[0,0.51]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0 - 0.51 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p2.pH_OR<-
+b_qp_3k$result %>%  
+    filter(horiz_type=='OR') %>% 
+ filter(pH_dist_q =="(0.51,1.45]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0.51 - 1.45 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+
+
+p3.pH_OR<-
+b_qp_3k$result %>%  
+    filter(horiz_type=='OR') %>% 
+ filter(pH_dist_q =="(1.45,2.89]") %>% 
+  mutate(process=as.factor(process)) %>% 
+  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
+  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
+  count(process) %>% 
+  mutate(pct=n/sum(n)) %>% 
+  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('1.45 - 2.89 pH')+ylab(NULL)+theme_bw()+
+  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
+  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+```
+
+
+# the plot of processes for Organic layer
+*need to think how to interpret increasing disp. limitation over the pH gradient, just for OR layer*
+# *Eventually speak with James*
+```{r}
+process_pH_plot_OR<-
+ggarrange(p1.pH_OR, p2.pH_OR, p3.pH_OR,  ncol=3, nrow=1, common.legend = TRUE, legend="right")
+
+annotate_figure(process_pH_plot_OR, top=text_grob('Organic layer          ', size=14) ,
+                bottom = textGrob("Pairwise pH difference                   ", gp = gpar(cex = 1.3)))
+```
+
+
+
+##############
+# Add more pairing information, indicating the samples pairs coming from the same elevation step. 
+
+
+```{r}
+
+# this just takes the sample number and remove the 5 replicates, creating new column
+b_qp_3k$result<-
+b_qp_3k$result %>% 
+  mutate( S1 = str_sub(S1_repl, 1,1))
+
+b_qp_3k$result<-
+b_qp_3k$result %>% 
+  mutate( S2 = str_sub(S2_repl, 1,1))
+
+# indicate of samples belong to same or differe 'S' (sample location = elevation)
+b_qp_3k$result$S_match<-
+  ifelse(b_qp_3k$result$S1 == b_qp_3k$result$S2, 'Same_S', 'Diff_S')
+
+b_qp_3k$result$S_num<-
+  ifelse(b_qp_3k$result$S_match =='Same_S', b_qp_3k$result$S1, 'Mix_S')
+```
+
+# add Sample number (w/o replicate N, S, C, etc) to the sample table
+this is needed to add actual elevation info inot the null model results (only for the samples coming from same elevation)
+
+```{r}
+sample_tab<-
+sample_tab %>% 
+  mutate(S_num = str_sub(uniqueID, 1, 1))
+```
+
+# add actual elevation and other drivers to the null model res
+```{r}
+b_qp_3k$result$elevation<-
+  sample_tab$altitude[match(b_qp_3k$result$S_num, sample_tab$S_num)]
+
+b_qp_3k$result$pH<-
+  sample_tab$pH[match(b_qp_3k$result$S_num, sample_tab$S_num)]
+
+
+```
+
+
+# No apparent homogenization (bray curtis) among replicates across the elevation (or pH) gradient
+# however there is a sign of *weaker homogenising selection as pH increase (lower pH values act as filter)*
+```{r}
+b_qp_3k$result %>%
+  filter(S_match=='Same_S') %>% 
+  filter(horiz_pair=='Same_horiz') %>% 
+  ggplot()+aes(y=BC, x=as.factor(elevation), col= horiz_type)+geom_boxplot()+
+  ylab('BrayCurtis between replicates')
+
+b_qp_3k$result %>%
+  filter(S_match=='Same_S') %>% 
+  filter(horiz_pair=='Same_horiz') %>% 
+  ggplot()+aes(y=BC, x=as.factor(pH), col= horiz_type)+geom_boxplot()+
+  ylab('BrayCurtis between replicates')
+
+b_qp_3k$result %>%
+  filter(S_match=='Same_S') %>% 
+  filter(horiz_pair=='Same_horiz') %>% 
+  ggplot()+aes(y=bNTI, x=pH, col= horiz_type)+
+  #geom_smooth(aes(y=bNTI, x=pH))+
+  geom_boxplot(aes(y=bNTI, x=as.factor(pH))) +
+  ylab('BrayCurtis between replicates')+
+  geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')
+  
+
+```
+# Boxplot and trends for within sample bNTI vs pH values
+# highlights prevalent homogenising selection with low pH values (acidic soil)
+```{r}
+b_qp_3k$result %>%
+  filter(S_match == 'Same_S', horiz_pair == 'Same_horiz') %>% 
+  ggplot(aes(x = pH, y = bNTI, color = horiz_type, fill = horiz_type)) +
+  # 1. Add the boxplots first (keeping x as numeric)
+  geom_boxplot(aes(group = interaction(pH, horiz_type)), 
+               alpha = 0.3, 
+               outlier.shape = NA) + 
+  # 2. Add the smooth line
+  geom_smooth(method = "lm", se = TRUE) +
+  # 3. Aesthetics
+  labs(y = "bNTI between replicates", 
+       x = "Soil pH") +
+  theme_bw()+
+  geom_hline(yintercept = c(-2,2), col='black', linetype='dashed')
+```
+
+
+

@@ -1,0 +1,5 @@
+Sampler: DPM++ 2M SDE
+
+Steps: 30-40
+
+CFG: 3-6 (less is a bit more realistic)

@@ -1,0 +1,5 @@
+*.gz
+*.csv
+*.xlsx
+*.RData
+*.fasta

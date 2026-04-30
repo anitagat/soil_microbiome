@@ -1,0 +1,266 @@
+---
+title: "dada2"
+author: "Anita Gattei"
+date: "`r Sys.Date()`"
+output: html_document
+---
+# Workflow for the processing of 16S and ITS data, executed after the DADA2 guide written by Nico Salmaso. 
+
+```{r}
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install(version = "3.22")
+BiocManager::install("dada2")
+```
+
+
+```{r}
+library(dada2)
+library(openxlsx)
+library(vegan)
+library(tidyverse)
+packageVersion("dada2")
+```
+
+```{r}
+path <- ""
+setwd(path)
+list.files(path)
+# prepare the directories for tables and analyses
+pathtab <- paste0(path, '/', 'Tables/')
+pathana <- paste0(path, '/', 'Analysis/')
+pathtax <- paste0(path, '/', 'Taxonomy/')
+dir.create(pathtab)
+dir.create(pathana)
+dir.create(pathtax)
+```
+
+
+#### 16S ANALISI
+```{r}
+path <- "~/Downloads/FEM_AMPLICON_RUN011-20260323T143521Z-1-001/FEM_AMPLICON_RUN011/V4_folder/trimmed/"       
+setwd(path)
+fnFs <- sort(list.files(path, pattern="_R1.trimmed.fastq.gz", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern="_R2.trimmed.fastq.gz", full.names = TRUE))
+
+sample.names <- sapply(strsplit(basename(fnFs), "_"), '[', 1)
+#sample.names = gsub("-", "_", sample.names)
+#sample.names = gsub("NBFC_16S_","", sample.names)
+
+#view sample names
+sample.names
+```
+##### Visualisation of quality profiles 
+Quality profiles of the forward (R1, left) and reverse (R2, right) reads (primers trimmed). 
+Quality scores are encoded in the FASTQ files (fourth line of each single read). 
+The bases are along the horizontal axis, whereas the quality scores are reported on the vertical axis. 
+The gray-scale is a heat map of the frequency of each Q-score at each base position; darker colors correspond to higher frequency. The green line is the mean quality score at each base position, and the three orange lines show the quartiles (median, 50th continuous; 25th and 75th dashed). 
+The evaluation of quality profiles of all the samples can be facilitated by averaging the analysis (argument
+aggregate=TRUE, which computes an aggregate quality profile for all fastq files provided). 
+A red line is plotted
+when the sequences vary in length, indicating the percentage of reads (rigth y-axis) that extend to at least that
+position (on the x-axis)
+```{r}
+plotQualityProfile(fnFs[1:4])
+plotQualityProfile(fnRs[1:4])
+```
+
+
+##### Quality filtering 
+```{r}
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+out <- filterAndTrim(fnFs, filtFs, fnRs, filtRs, truncQ=5, truncLen=c(260,160), #based on quality profile plots
+maxEE=c(1,1), matchIDs=TRUE, maxN=0, rm.phix=TRUE, multithread=TRUE, verbose=TRUE)
+out 
+```
+
+```{r}
+#The output shows the fraction of reads discarded. The quality of the filtered filed can be also cheked:
+
+plotQualityProfile(filtFs[1:4])
+plotQualityProfile(filtRs[1:4])
+```
+
+##### Learning error rates
+– Visualization of the estimated error rates. Each single graph shows the error rates for each possible transition
+(e.g. A→C, A→G, … T→G). The red line is what is expected based on the quality score; the black line is the estimate,
+whereas the black dots are the observed. Overall, the observed, black dots, should track well the estimated errors
+(black line).
+```{r}
+#DADA2 removes all sequencing errors to reveal the members of the sequenced community.The error profiles are used in a successive step to correct errors.
+
+set.seed(123)
+errF <- learnErrors(filtFs, multithread=TRUE, verbose = TRUE, nbases = 2e+08, MAX_CONSIST
+= 15)
+errR <- learnErrors(filtRs, multithread=TRUE, verbose = TRUE, nbases = 2e+08, MAX_CONSIST
+= 15)
+plotErrors(errF, nominalQ=TRUE)
+plotErrors(errR, nominalQ=TRUE)
+```
+
+##### Sample inference step
+```{r}
+# The sample inference algorithm is applied to the filtered and trimmed sequence data, with the aim to infer true biological sequences. This is done by incorporating the quality profiles and abundances of each unique sequence, deciding if sequences are “true” (of biological origin), or spurious
+dadaFs <- dada(filtFs, err=errF, pool=FALSE, multithread=TRUE)
+dadaRs <- dada(filtRs, err=errR, pool=FALSE, multithread=TRUE)
+```
+
+##### Merging forward (R1) and reverse (R2) reads
+```{r}
+# Reconstruction of target amplicons requires the overlapping region of F and R reads to be identical.
+#The function mergePairs requires as default a minimum of 12 bp. Also considering the fraction of merged reads (see table below), in this dataset, the minimum overlap has been fixed at 35. No mismatches are allowed in the overlap region
+
+merged_reads <- mergePairs(dadaFs, filtFs, dadaRs, filtRs, verbose=TRUE, minOverlap=35,
+maxMismatch=0)
+length(merged_reads)
+head(merged_reads[[1]])
+```
+
+##### Generate count table
+```{r}
+seqtaball <- makeSequenceTable(merged_reads)
+dim(seqtaball)
+
+plot(table(nchar(getSequences(seqtaball))), xlab="Reads R1+R2 merged length")
+```
+
+A fraction of lengths in the merged sequences do not fall within the expected range for this V3-V4
+amplicon, possibly because of non-specific priming. These sequences could be removed. This is
+conservative, and it could be worth always a try to inspect the nature of the discarded sequences.
+
+```{r}
+seqtab <- seqtaball[,nchar(colnames(seqtaball)) %in% seq(365,381)]
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+plot(table(nchar(getSequences(seqtaball))), xlab="Reads R1+R2 merged length")
+```
+
+##### Chimera identification and removal
+```{r}
+seqtab.nochim <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE,
+verbose=TRUE)
+dim(seqtab.nochim)
+sum(seqtab.nochim)/sum(seqtab)*100 # number of reads after removing chimeras
+```
+As a further computational check, it is worth to know how many reads were discarded at
+various points of the pipeline:
+```{r}
+getN <- function(x) sum(getUniques(x))
+track <- cbind(out, sapply(dadaFs, getN), sapply(dadaRs, getN), sapply(merged_reads,
+getN), rowSums(seqtab.nochim))
+colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+rownames(track) <- sample.names
+head(track)
+```
+
+##### Taxonomy assignment with default function
+The minimum bootstrap confidence for assigning a taxonomic level has been set to 95 (default=50). 
+```{r}
+taxa138a <- assignTaxonomy(seqtab.nochim, "/home/mina/Downloads/silva_nr99_v138.2_toSpecies_trainset.fa.gz", multithread=TRUE, minBoot = 95, verbose = TRUE)
+```
+The successive step is the taxonomic assignment at the species level, based on exact matching
+between ASVs and reference strains. The option allowMultiple allows obtaining a concatenated
+string of all exactly matched species.
+
+```{r}
+taxa <- addSpecies(taxa138a,"/home/mina/Downloads/silva_v138.2_assignSpecies.fa.gz", allowMultiple = FALSE)
+```
+ 
+
+##### Collecting dada2 results
+Saving tables for downstream statistical analyses.
+```{r}
+# save sequences with original headers
+#write.csv(t(seqtab.nochim), "~/Documents/Work/FEM/FEM/NBFC/Tassonomia/16S_seqtab-nochim.csv", quote=FALSE)
+
+# simplify names to sequence headers(seq1, seq2...seq100...)
+# adapted from: https://github.com/benjjneb/dada2/issues/655
+seqs <- colnames(seqtab.nochim)
+SeqName <- vector(dim(seqtab.nochim)[2], mode="character")
+SeqName_ft <- vector(dim(seqtab.nochim)[2], mode="character")
+for (i in 1:dim(seqtab.nochim)[2]) {
+ SeqName[i] <- paste("seq", i, sep="")
+ SeqName_ft[i] <- paste(">seq", i, sep="")
+}
+
+# write sequences in a FASTA file
+fastaseqs_ft <- rbind(SeqName_ft, seqs)
+#write(fastaseqs_ft, "~/Documents/Work/FEM/FEM/NBFC/Reads/fastaseqs.fasta")
+
+# write sequences in a FASTA file (tabula)
+fastaseqs <- cbind(SeqName, seqs)
+#write.csv(fastaseqs, "~/Documents/Work/FEM/FEM/NBFC/Tassonomia/fastaseqs.csv", quote=FALSE, row.names = FALSE)
+
+# write count table
+seqtab.nochim.t <- t(seqtab.nochim)
+row.names(seqtab.nochim.t) <- SeqName
+seqtab.nochim.t <- tibble::rownames_to_column(as.data.frame(seqtab.nochim.t), "SeqName")
+#write.csv(seqtab.nochim.t,"~/Documents/Work/FEM/FEM/NBFC/Tassonomia/16s_counts.csv", quote=FALSE, row.names = FALSE)
+
+# write taxonomy table
+taxtable <- taxa138a
+row.names(taxtable) <- SeqName
+taxtable=data.frame(taxtable)
+#taxtable <- tibble::rownames_to_column(as.data.frame(taxtable), "SeqName")
+#write.csv(taxtable, "~/Documents/Work/FEM/FEM/NBFC/Tassonomia/taxtable.csv", quote=FALSE, row.names = FALSE)
+
+# Join results and save in spreadsheet (excel) format
+taxtable$SeqName=row.names(taxtable)
+tax_counts <- left_join(taxtable, seqtab.nochim.t, by = "SeqName", keep = TRUE)
+tax_counts_fasta <- left_join(tax_counts, as.data.frame(fastaseqs), by = c("SeqName.x" =
+"SeqName"), keep = TRUE)
+tax_counts_fasta=tax_counts_fasta[,-c(8,9)]
+openxlsx::write.xlsx(tax_counts_fasta, file = "~/Downloads/FEM_AMPLICON_RUN011-20260323T143521Z-1-001/tax_counts_fasta_16s_run011.xlsx",
+overwrite = TRUE, asTable = FALSE, sheetName = "NBFC_16S", firstRow = TRUE, zoom = 90,
+keepNA = TRUE)
+#write.csv(tax_counts_fasta,"~/Documents/Work/FEM/FEM/NBFC/Tassonomia/assigned_reads/16s_tax_counts_fasta.csv")
+```
+
+```{r}
+fastafile=read.csv("/Users/macbook/Documents/Work/FEM/FEM/NBFC/Tassonomia/assigned_reads/16s_fastaseqs.csv")
+
+# Function to write FASTA
+write_fasta <- function(names, seqs, file) {
+  con <- file(file, "w")
+  for (i in seq_along(names)) {
+    writeLines(paste0(">", names[i]), con)
+    writeLines(seqs[i], con)
+  }
+  close(con)
+}
+
+# Save as FASTA
+write_fasta(fastafile$SeqName, fastafile$seqs, "/Users/macbook/Documents/Work/FEM/FEM/NBFC/Tassonomia/assigned_reads/16s.fasta")
+
+```
+
+##### Taxonomic analysis
+```{r}
+# VEGAN
+library(vegan)
+counts <-read.csv(file="~/Documents/Work/FEM/FEM/NBFC/Tassonomia/assigned_reads/16S_counts.csv", header=T, row.names=1, check.names=FALSE)
+head(counts)
+names(counts)=gsub("_L001_R1.trimmed.fastq.gz","",names(counts))
+names(counts)=gsub("NBFC-16S-","",names(counts))
+counts2 <- t(counts)^0.25
+bc <- vegdist(counts2, method="bray")
+plot(hclust(bc))
+```
+
+```{r}
+# PHYLOSEQ ANALYSIS
+library(phyloseq)
+metadata <- read.csv(file="metadata.csv", header=T, row.names=1, sep = ";")
+
+taxtable_ps <- taxa138
+row.names(taxtable_ps) <- SeqName
+nbfc16s <- phyloseq(otu_table(counts, taxa_are_rows=TRUE), sample_data(metadata),
+tax_table(taxtable_ps))
+
+# nbfc16s can be successively loaded in new R sessions, and data analyzed with phyloseq 
+saveRDS(nbfc16s, file = "NBFC16S_phyloseq.rds")
+```
+
