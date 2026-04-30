@@ -854,17 +854,20 @@ b.bNTI.dist_OR<-
 *we see again the pH is the main driver underpinning bNTI variation*
 *and that pH has stronger effect on MIN layers, rather than OR*
 ```{r}
-#MRM on MIN
-MRM(as.vector(as.dist(b.bNTI.dist_MIN$index)) ~ as.vector(elev_dist_samples_MIN)) # R2=0.035; p=0.001
-MRM(as.vector(as.dist(b.bNTI.dist_MIN$index)) ~ as.vector(pH_dist_samples_MIN)) # R2=0.589; p=0.001
+y_MIN <- as.vector(as.dist(b.bNTI.dist_MIN$index))
+y_OR  <- as.vector(as.dist(b.bNTI.dist_OR$index))
 
-MRM(as.vector(as.dist(b.bNTI.dist_MIN$index)) ~ as.vector(elev_dist_samples_MIN)+ as.vector(pH_dist_samples_MIN)) # R2=0.589; negligible effect of elevation 
+#MRM on MIN
+MRM(y_MIN ~ as.vector(elev_dist_samples_MIN)) # R2=0.035; p=0.001
+MRM(y_MIN ~ as.vector(pH_dist_samples_MIN)) # R2=0.589; p=0.001
+
+MRM(y_MIN ~ as.vector(elev_dist_samples_MIN)+ as.vector(pH_dist_samples_MIN)) # R2=0.589; negligible effect of elevation
 
 # MRM on OR
-MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(elev_dist_samples_OR)) # R2=0.005, p=NS
-MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(pH_dist_samples_OR)) # R2 = 0.26
+MRM(y_OR ~ as.vector(elev_dist_samples_OR)) # R2=0.005, p=NS
+MRM(y_OR ~ as.vector(pH_dist_samples_OR)) # R2 = 0.26
 
-MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(elev_dist_samples_OR)+ as.vector(pH_dist_samples_OR)) # R2=0.27
+MRM(y_OR ~ as.vector(elev_dist_samples_OR)+ as.vector(pH_dist_samples_OR)) # R2=0.27
 ```
 
 
