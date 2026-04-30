@@ -876,6 +876,45 @@ MRM(as.vector(as.dist(b.bNTI.dist_OR$index)) ~ as.vector(elev_dist_samples_OR)+ 
 # -----------------------------
 # create the quantile cut for elevation distance and pH distance on the null model results
 
+## Create a function to plot the process barplot for each quantile of the gradients (elevation and pH)
+```{r}
+
+plot_process_bar <- function(data, var, bin, x_label, horiz = NULL) {
+  
+  df <- data
+  
+  # Apply horiz_type filter only if provided
+  if (!is.null(horiz)) {
+    df <- df %>% filter(horiz_type == horiz)
+  }
+  
+  df %>%  
+    filter({{ var }} == bin) %>% 
+    mutate(
+      process = factor(
+        process,
+        levels = c(
+          'Dispersal.Limitation',
+          'Variable.Selection',
+          'Homogeneous.Selection',
+          'Homogenizing.Dispersal',
+          'Undominated'
+        )
+      )
+    ) %>%
+    count(process) %>% 
+    mutate(pct = n / sum(n)) %>% 
+    ggplot(aes(x = '', y = pct, fill = process)) +
+    geom_bar(stat = 'identity') +
+    xlab(x_label) +
+    ylab(NULL) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+    scale_fill_manual(
+      values = c("seagreen", "orange", "blueviolet", "firebrick3", "grey70")
+    )
+}
+```
 
 ```{r}
 b_qp_3k$result$elev_dist_q<-
@@ -899,43 +938,9 @@ unique(b_qp_3k$result$process)
 # Plot of processes over three quantiles of elevation diff (all layers combined)
 ```{r}
 
-p1.elev<-
-b_qp_3k$result %>%  
- filter(elev_dist_q =="[0,117]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0-117 m')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p2.elev<-
-b_qp_3k$result %>%  
- filter(elev_dist_q =="(117,316]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('117--316 m')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p3.elev<-
-b_qp_3k$result %>%  
- filter(elev_dist_q =="(316,639]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('316-639 m')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+p1.elev <- plot_process_bar(b_qp_3k$result, elev_dist_q, "[0,117]", "0 - 117 m")
+p2.elev <- plot_process_bar(b_qp_3k$result, elev_dist_q, "(117,316]", "117 - 316 m")
+p3.elev <- plot_process_bar(b_qp_3k$result, elev_dist_q, "(316,639]", "316 - 639 m")
 
 
 ```
@@ -959,43 +964,9 @@ annotate_figure(process_elev_plot_ALL, top=text_grob('All layers          ', siz
 
 # Plot of processes over pH differences (combining all layers)
 ```{r}
-p1.pH<-
-b_qp_3k$result %>%  
- filter(pH_dist_q =="[0,0.51]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0 - 0.51 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p2.pH<-
-b_qp_3k$result %>%  
-     filter(pH_dist_q =="(0.51,1.45]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0.51 - 1.45 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p3.pH<-
-b_qp_3k$result %>%  
- filter(pH_dist_q =="(1.45,2.89]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('1.45 - 2.89 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+p1.pH <- plot_process_bar(b_qp_3k$result, pH_dist_q, "[0,0.51]", "0 - 0.51 pH")
+p2.pH <- plot_process_bar(b_qp_3k$result, pH_dist_q, "(0.51,1.45]", "0.51 - 1.45 pH")
+p3.pH <- plot_process_bar(b_qp_3k$result, pH_dist_q, "(1.45,2.89]", "1.45 - 2.89 pH")
 ```
 
 # combined plot of processes for MIN layer over pH
@@ -1018,46 +989,9 @@ annotate_figure(process_pH_plot_ALL, top=text_grob('All layers          ', size=
 
 # MIN layers processes plot
 ```{r}
-p1.pH_MIN<-
-b_qp_3k$result %>%  
-  filter(horiz_type=='MIN') %>% 
- filter(pH_dist_q =="[0,0.51]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0 - 0.51 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p2.pH_MIN<-
-b_qp_3k$result %>%  
-    filter(horiz_type=='MIN') %>% 
- filter(pH_dist_q =="(0.51,1.45]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0.51 - 1.45 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p3.pH_MIN<-
-b_qp_3k$result %>%  
-    filter(horiz_type=='MIN') %>% 
- filter(pH_dist_q =="(1.45,2.89]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('1.45 - 2.89 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+p1.pH_MIN <- plot_process_bar(b_qp_3k$result, pH_dist_q, "[0,0.51]", "0 - 0.51 pH", "MIN")
+p2.pH_MIN <- plot_process_bar(b_qp_3k$result, pH_dist_q, "(0.51,1.45]", "0.51 - 1.45 pH", "MIN")
+p3.pH_MIN <- plot_process_bar(b_qp_3k$result, pH_dist_q, "(1.45,2.89]", "1.45 - 2.89 pH", "MIN")
 ```
 
 # combined plot of processes for min layer over pH
@@ -1075,46 +1009,9 @@ annotate_figure(process_pH_plot_MIN, top=text_grob('Mineral layer          ', si
 
 # OR layers processes
 ```{r}
-p1.pH_OR<-
-b_qp_3k$result %>%  
-  filter(horiz_type=='OR') %>% 
- filter(pH_dist_q =="[0,0.51]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0 - 0.51 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p2.pH_OR<-
-b_qp_3k$result %>%  
-    filter(horiz_type=='OR') %>% 
- filter(pH_dist_q =="(0.51,1.45]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('0.51 - 1.45 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
-
-
-p3.pH_OR<-
-b_qp_3k$result %>%  
-    filter(horiz_type=='OR') %>% 
- filter(pH_dist_q =="(1.45,2.89]") %>% 
-  mutate(process=as.factor(process)) %>% 
-  #mutate(process= str_replace(process, "Heterogeneous", "Variable")) %>% 
-  mutate(process=factor(process, levels=c('Dispersal.Limitation', 'Variable.Selection','Homogeneous.Selection' , 'Homogenizing.Dispersal', 'Undominated'))) %>%
-  count(process) %>% 
-  mutate(pct=n/sum(n)) %>% 
-  ggplot+ aes(x='',y=pct, fill=process)+ geom_bar(stat='identity') +xlab('1.45 - 2.89 pH')+ylab(NULL)+theme_bw()+
-  theme(axis.text.x = element_text(angle=45, vjust = 1, hjust = 1))+
-  scale_fill_manual(values=c("seagreen", "orange", "blueviolet", "firebrick3", "grey70"))
+p1.pH_OR  <- plot_process_bar(b_qp_3k$result, pH_dist_q, "[0,0.51]", "0 - 0.51 pH", "OR")
+p2.pH_OR  <- plot_process_bar(b_qp_3k$result, pH_dist_q, "(0.51,1.45]", "0.51 - 1.45 pH", "OR")
+p3.pH_OR  <- plot_process_bar(b_qp_3k$result, pH_dist_q, "(1.45,2.89]", "1.45 - 2.89 pH", "OR")
 ```
 
 
